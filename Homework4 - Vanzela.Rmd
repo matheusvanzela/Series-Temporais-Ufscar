@@ -1,0 +1,117 @@
+---
+title: "Homework4"
+author: "Matheus Vanzela"
+date: "22/08/2023"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Usei pacotes diferentes apenas para testar as funcionalidades
+
+```{r packages, echo=TRUE}
+# Bibliotecas
+library(tseries)
+library(fGarch)
+library(forecast)
+
+```
+
+```{r functions}
+# Function to calculate persistency
+persist <- function(modelo.garch){
+  persistence <- modelo.garch@fit[["coef"]][["beta1"]]+modelo.garch@fit[["coef"]][["alpha1"]]+modelo.garch@fit[["coef"]][["omega"]]
+  return(persistence)
+}
+
+# Function to calculate half life
+hl <- function(persistencia){
+  L <- log(0.5)/log(persistencia)
+  return(L)
+}
+
+```
+
+```{r data}
+# Downloading PETR4 data from Yahoo Finance
+petr4 <- get.hist.quote(instrument = "PETR4.SA", start = "2019-01-01", end = Sys.Date(), quote = "Close")
+ibov <- get.hist.quote(instrument = "^BVSP", start = "2019-01-01", end = Sys.Date(), quote = "Close")
+
+# Eliminating NA's
+petr4 = petr4[is.na(petr4)==F] 
+ibov = ibov[is.na(ibov)==F]
+
+# Calculating returns
+petr4_returns <- diff(log(petr4))
+ibov_returns <- diff(log(ibov))
+
+```
+# Exercício 1
+##a)
+alpha é o parâmetro do modelo ARCH(1) que mede o impacto do erro do período anterior na variância condicional atual. Omega pode ser entendido como o valor da variação caso as variações ao longo do tempo não estivessem sendo passadas para a eq do ARCH(1). Ambos devem ser não-negativos para garantir que a variância condicional seja sempre positiva, condição de existência da variância no R.
+
+##b)
+Eles permitem avaliar clusters de volatilidade, ou seja, períodos de alta ou baixa volatilidade, modelando a variância condicional dos retornos como uma função de seus valores passados. Isso permite que os modelos ARCH capturem a persistência da volatilidade e identifiquem clusters de volatilidade nos dados. 
+
+##c)
+Nâo capturam o efeito da magnitude dos choques negativos em face aos choques positivos: o mercado "sente mais o efeito negativo"; outro efeito não capturado é a não-normalidade condicional ou incondicional da 
+
+##d)
+O modelo ARCH(1) é um caso específico em que a variância condicional é modelada como uma função linear do quadrado do erro do período anterior; variância incondicional é a variância calculado para todos os períodos.
+
+# Exercício 2
+No contexto dos modelos ARCH, as funções de autocorrelação e autocorrelação parciais podem ser usadas para identificar e validar a forma dos modelos GARCH. Além disso a FAC dos resíduos ao quadrado mostram ou não autocorrelação parcial dos residuos. Em modelos aderentes à família ARCH os resíduos ao quadrado tem FAC com decaimento lento.
+
+```{r}
+# Plots do quadrado dos resíduos
+Acf(petr4_returns^2, na.action = na.pass)
+Acf(ibov_returns^2, na.action = na.pass)
+
+```
+
+Nota-se o decaimento lento no gráfico de autocorrelação do quadrado dos residuos, indicando modelagem da volatilidade pelos modelos ARCH.
+
+
+## Exercício 3
+Código para gerar os modelos de acordo com o que foi exigido na questão.
+
+```{r modelling}
+garch.petr.t = garchFit(formula = ~garch(1,1), data = petr4_returns, cond.dist = "std", trace = FALSE)
+garch.ibov.t = garchFit(formula = ~garch(1,1), data = ibov_returns, cond.dist = "std", trace = FALSE)
+garch.ibov.norm = garchFit(formula = ~garch(1,1), data = ibov_returns, cond.dist = "norm", trace = FALSE)
+garch.petr.norm = garchFit(formula = ~garch(1,1), data = petr4_returns, cond.dist = "norm", trace = FALSE)
+
+
+```
+
+## Exercício 4
+```{r persistency}
+# 
+# IBOV
+p.ibov.t <- persist(garch.ibov.t)
+p.ibov.t
+p.ibov.n <- persist(garch.ibov.norm)
+p.ibov.n
+hl(p.ibov.t)
+hl(p.ibov.n)
+
+#PETROBRAS
+p.petr.t <- persist(garch.petr.t)
+p.petr.t
+p.petr.n <- persist(garch.petr.norm)
+p.petr.n
+hl(p.petr.t)
+hl(p.petr.n)
+
+```
+A persistencia e a half life relacionada a distribuição t-Student é maior, indicando que os choques tem maior representação quando modelados pela distribuição t-Student.
+
+No caso da PETR4 a diferença mostrou-se ainda maior. É importante destacar que nos dois testes, tanto para o IBOV quanto para PETR a persistencia tem um valor próximo de 1, indicando uma alta persistência dos choques.
+
+Ainda é importante observar que a diferença entre os valores de Half Life no caso de PETR4 é grande o suficiente para afirmar que um modelo de volatilidade descrito pela normal dissiparia mais rapidamente os choques do que pela t-Student. 
+
+Outro fator a ser considerado na interpretação é que comparando as persistências dos ativos analisados, nota-se que choque no índice tem persistência maior por tratar-se de um resultado que considera diversos ativos, quando comparados à PETR4 que é um ativo isolado.
+
+

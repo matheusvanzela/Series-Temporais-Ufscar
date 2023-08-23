@@ -1,0 +1,178 @@
+---
+title: "Modelos da família ARCH: pacote rugarch"
+author: "Andreza Palma"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+Primeiro, vamos carregar os pacotes necessários (caso ainda não tenha instalado, é preciso primeiro instalar antes de carregar!!!).
+
+```{r}
+library(BatchGetSymbols) ### pegar dados yahoo finance (preços diárias ativos negociados em bolsa)
+library(rugarch)
+library(tidyverse)
+library(ggthemes) 
+library(FinTS)
+library(WriteXLS)
+library(xtable)
+library(tbl2xts)
+```
+
+Para o nosso exemplo, vamos usar os dados do IBOVESPA que serão importados através do pacote BatchGetSymbols. Se vc não se lembrar o procedimento, volte para a aula de fatos estilizados. 
+
+```{r}
+#ticker IBOVESPA
+tickers<-c("^BVSP")
+
+ibov<- BatchGetSymbols(tickers,
+                                 first.date = '2019-03-21',
+                                 last.date = Sys.time(),
+                                 type.return = "log",
+                                 freq.data = "daily")
+
+ibov <- ibov[[2]]
+```
+
+Vamos selecionar os retornos diários da série do IBOVESPA e separar as datas da série de retornos:
+
+```{r}
+daily_returns <- ibov %>% 
+  select(ref.date,ret.closing.prices)
+
+date <- daily_returns %>%
+  select(ref.date) %>% 
+  rename(date = ref.date) %>% 
+  slice(-1)
+
+daily_returns <- daily_returns %>%
+  select(ret.closing.prices) %>% 
+  slice(-1)
+
+```
+
+**TESTANDO EFEITO ARCH: TESTE LM**
+
+Vamos realizar o teste LM para heterocedasticidade condicional para 1, 2 e 10 defasagens. A hipótese nula é que não há efeito ARCH (heterocedasticidade condicional). Portanto, ao se rejeitar a hipótese nula, um modelo ARCH mostra-se adequado. Esse teste é realizado pelo pacote FinTS. Lembre-se também que é possível analisar a FACP dos retornos ao quadrado, como vimos no módulo de fatos estilizados. 
+
+```{r}
+ArchTest(daily_returns,lags=1,demean=TRUE)
+ArchTest(daily_returns,lags=2,demean=TRUE)
+ArchTest(daily_returns,lags=10,demean=TRUE)
+```
+
+
+
+**ESTIMAÇÃO DE MODELOS DA FAMÍLIA ARCH**
+
+No pacote rugarch, primeiro usamos o comando ugarchspec para selecionar a configuração dos modelos que serão estimados. É possível especificar a equação para a média condicional e também para a variância condicional. 
+
+As opções para a equação da variância condicional incluem (variance.model):
+- sGARCH
+- eGARCH
+- GJR
+- apARCH
+- iGARCH
+- csGARCH
+
+Para especificar a equação da média, usamos mean.model = list(armaOrder=c(p,q)), onde p e q são as ordens da parte AR e MA, respectivamente. 
+
+Caso deseje estimar o modelo GARCH-M, deve incluir archm = TRUE.
+
+Várias distribuições para o erro estão disponíveis e são especificadas em distribution.model = "". As opções incluem:
+- “norm”, para a distribuição normal;
+- “snorm” para a distribuição normal assimétrica;
+- “std” para a t-Student;
+- “sstd” para a t-Student assimétrica;
+- “ged” para a distribuição de erro generalizada;
+- “sged” para a distribuição de erro generalizada assimétrica;
+- “nig” para a distribuição normal inversa;
+- “ghyp” para a hiperbólica generalizada;
+- “jsu” para a distribuição Johnson’s SU.
+
+Abaixo, vamos especificar um modelo ARCH(1) para a série de retornos do IBOVESPA, sem um modelo para a média.  
+
+```{r}
+garch.spec = ugarchspec(variance.model = list(model = "sGARCH", garchOrder = c(1, 0)), mean.model = list(armaOrder=c(0,0),include.mean = FALSE),
+                        distribution.model = "std")
+```
+
+
+Com garch.fit, podemos estimar o modelo, dizendo onde está a configuração (spec = garch.spec) - note que garch.spec foi o nome que demos para a configuração escolhida, e quais serão os dados utilizados. 
+
+```{r}
+garch.fit = ugarchfit(spec=garch.spec, data=daily_returns)
+```
+
+Para verificar os resultados da estimação, basta chamar pelo nome escolhido, no caso, garch.fit:
+
+```{r}
+garch.fit 
+```
+
+
+O parâmetro de persistência (soma dos termos AR e MA, ou seja, ARCH e GARCH) pode ser obtido através da função persistence:
+
+```{r}
+persistence(garch.fit)
+```
+
+E os critérios de informação (serão retornados os critérios de informação de Akaike, Schwarz (Bayes), Shibata e Hannan-Quinn :
+
+```{r}
+infocriteria(garch.fit)
+```
+
+Para organizar os resultados em uma tabela e retornar o "código" para o LaTeX, use o que está descrito abaixo:
+
+```{r, results = 'asis'}
+Table <- xtable(garch.fit@fit$matcoef)
+print(Table, type = "latex", comment = FALSE)
+```
+
+Para fazer o gráfico da variância condicional:
+
+```{r}
+
+
+sigma <- sigma(garch.fit) %>% xts_tbl() 
+colnames(sigma) <- c("date", "sigma") 
+sigma <- sigma %>% mutate(date = as.Date(date))
+ggplot(sigma) + geom_line(aes(x = date , y = sigma)) + theme_solarized()
+```
+
+
+Há alguns gráficos que podemos analisar também após a estimação. Abaixo mostramos todas as opções. 
+
+```{r}
+plot(garch.fit, which="all")
+```
+
+Para mostrar apenas um dos gráficos, basta colocar seu número em which="". Abaixo escolhemos o gráfico 1. 
+
+```{r}
+plot(garch.fit,which=1)
+```
+
+Finalmente, a previsão para a volatilidade através do modelo estimado pode ser obtida pela função ugarchforecast, onde n.ahead significa quantos passos a frente queremos a previsão. 
+
+```{r}
+garchf.1 = ugarchforecast(garch.fit,n.ahead=10)
+garchf.1
+```
+
+E é possível analisar graficamente também, através de: 
+
+```{r}
+p1 = plot(garchf.1,which=1)
+p1
+
+p2=plot(garchf.1,which=3)
+p2
+```
+
+
+
+
